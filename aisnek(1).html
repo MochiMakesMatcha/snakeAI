@@ -1,0 +1,449 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<title>Snake AI – Auto Restart</title>
+<style>
+  body {
+    background: #111;
+    color: #eee;
+    font-family: monospace;
+    display: flex;
+    flex-direction: column;
+    align-items: center;
+  }
+  canvas {
+    border: 2px solid #555;
+    background: #000;
+    image-rendering: pixelated;
+  }
+  pre {
+    width: 420px;
+    max-height: 220px;
+    overflow: auto;
+    background: #1a1a1a;
+    padding: 8px;
+    margin-top: 8px;
+  }
+  label, button {
+    margin-top: 8px;
+  }
+  button {
+    padding: 6px 12px;
+    background: #222;
+    color: #eee;
+    border: 1px solid #555;
+    cursor: pointer;
+  }
+  #tableOverlay {
+    position: fixed;
+    inset: 0;
+    background: rgba(0,0,0,0.85);
+    display: none;
+    overflow: auto;
+    padding: 20px;
+  }
+  #tableContent {
+    display: grid;
+    grid-template-columns: repeat(auto-fill, minmax(140px, 1fr));
+    gap: 12px;
+  }
+  .stateBox {
+    background: #111;
+    border: 1px solid #444;
+    padding: 6px;
+    font-size: 10px;
+    white-space: pre;
+  }
+  .stateBox .action {
+    color: #7fff7f;
+    font-size: 11px;
+    margin-top: 4px;
+  }
+</style>
+</head>
+<body>
+
+<h2>🐍 Snake AI Playground</h2>
+
+<label>
+  Field size:
+  <select id="fieldSize">
+    <option value="10" selected>10×10</option>
+    <option value="20">20×20</option>
+  </select>
+</label>
+
+<button id="showTable">Show table</button>
+
+<canvas id="game" width="400" height="400"></canvas>
+<pre id="log"></pre>
+
+<div id="tableOverlay">
+  <div id="tableContent"></div>
+</div>
+
+<script>
+/* =========================
+   CONFIG
+========================= */
+let GRID_SIZE = 10;
+const TILE_SIZE = 50;
+const TICK_MS = 1;
+const RESET_DELAY_TICKS = 5;
+
+/* =========================
+   STATE
+========================= */
+let snake, apple, dir;
+let alive = true;
+let ateApple = false;
+
+let episode = 0;
+let pendingReset = false;
+let resetCountdown = 0;
+
+let score = 0;
+let highScore = 0;
+
+const directions = ["up", "right", "down", "left"];
+let table = {};
+
+/* =========================
+   RESET / INIT
+========================= */
+function resetGame() {
+  snake = [{
+    x: Math.floor(GRID_SIZE / 2),
+    y: Math.floor(GRID_SIZE / 2)
+  }];
+  dir = 1; // right
+  alive = true;
+  ateApple = false;
+  pendingReset = false;
+  resetCountdown = 0;
+  score = 0;
+  spawnApple();
+}
+
+function spawnApple() {
+  while (true) {
+    const a = {
+      x: Math.floor(Math.random() * GRID_SIZE),
+      y: Math.floor(Math.random() * GRID_SIZE)
+    };
+    if (!snake.some(s => s.x === a.x && s.y === a.y)) {
+      apple = a;
+      return;
+    }
+  }
+}
+
+resetGame();
+
+/* =========================
+   AI CONTROL API
+========================= */
+function turnLeft() { dir = (dir + 3) % 4; }
+function turnRight() { dir = (dir + 1) % 4; }
+
+function moveForward() {
+  if (!alive) return;
+
+  ateApple = false;
+  const head = { ...snake[0] };
+
+  if (directions[dir] === "up") head.y--;
+  if (directions[dir] === "down") head.y++;
+  if (directions[dir] === "left") head.x--;
+  if (directions[dir] === "right") head.x++;
+
+  // wall collision
+  if (head.x < 0 || head.y < 0 || head.x >= GRID_SIZE || head.y >= GRID_SIZE) {
+    die();
+    return;
+  }
+
+  // self collision
+  if (snake.some(s => s.x === head.x && s.y === head.y)) {
+    die();
+    return;
+  }
+
+  snake.unshift(head);
+
+  if (head.x === apple.x && head.y === apple.y) {
+    ateApple = true;
+    spawnApple();
+    score++;
+    if(score > highScore) highScore = score;
+  } else {
+    snake.pop();
+  }
+}
+
+function die() {
+  alive = false;
+  pendingReset = true;
+  resetCountdown = RESET_DELAY_TICKS;
+}
+
+function isAlive() { return alive; }
+function didEatApple() { return ateApple; }
+
+/* =========================
+   VIEW (with directional head)
+========================= */
+function getView(size) {
+  const half = Math.floor(size / 2);
+  const head = snake[0];
+  let out = "";
+
+  // map dir to letter
+  const headChar = { "up":"^", "right":">", "down":"v", "left":"<" }[directions[dir]];
+
+  for (let y = head.y - half; y <= head.y + half; y++) {
+    for (let x = head.x - half; x <= head.x + half; x++) {
+      if (x < 0 || y < 0 || x >= GRID_SIZE || y >= GRID_SIZE) out += "#";
+      else if (x === head.x && y === head.y) out += headChar;
+      else if (snake.some(s => s.x === x && s.y === y)) out += "S";
+      else if (x === apple.x && y === apple.y) out += "A";
+      else out += ".";
+    }
+    out += "\n";
+  }
+  return out;
+}
+
+function getGameState() {
+  return JSON.stringify({
+    episode,
+    alive,
+    direction: directions[dir],
+    snake,
+    apple
+  }, null, 2);
+}
+
+/* =========================
+   your� AI
+========================= */
+// Copyright � 2025 MochiMakesMatcha. Licensed under CC BY-SA found at https://creativecommons.org/licenses/by-sa/4.0/
+var lastState=null;
+var lastChoice=null;
+var noRecord=false;
+function snakeAI() {
+  // This is where you implement your AI algorithm
+            // You have access to:
+            // - turnLeft(), turnRight(), moveForward()
+            // - getView(size) - returns a string of the area around the snake's head
+            // - isAlive() - returns true if snake is alive
+            // - didEatApple() - returns true if snake ate apple last move
+            // - getGameState() - returns full game state as string
+
+            var state = getView(5)
+            var noRecord=false;
+            var reward = 0;
+            var biggest = -100;
+            var listedReward = 0;
+            var state2 = table[state];
+            var choicearr = [];
+            var rewardarr=[];
+            var status="";
+
+            //decisions, decisions
+            if(table[state]){
+                if(Object.keys(state2).length < 3){
+                    noRecord = true;
+                    status="random - not enough data";
+                }else if(getRandomInt(100) < 1){
+                    noRecord = true;
+                    status="true random";
+                }else{
+                    biggest = Math.max(...Object.values(state2));
+                    for(var i=0; i < Object.keys(state2).length; i++ ){
+                        listedReward = Number(state2[Object.keys(state2)[i]]);
+                        if(Math.abs(listedReward - biggest) <= 0.1){
+                            choicearr.push(Object.keys(state2)[i]);
+                            rewardarr.push(listedReward.toFixed(2));
+                        };
+                    };
+                    if(choicearr.length == 0){
+                        choicearr = Object.keys(state2);
+                    };
+                    choice = choicearr[getRandomInt(choicearr.length)] ?? "huh??";
+                };
+            }else{
+                status = "random - this state not recorded";
+                noRecord=true;
+            };
+
+            if(noRecord == true){
+                const movements = ["forward", "left", "right"];
+                choice = movements[getRandomInt(3)];
+            };
+
+            if(choice == "forward"){
+                moveForward();
+            }else if(choice == "left"){
+                turnLeft();
+                moveForward();
+            }else if(choice == "right"){
+                turnRight();
+                moveForward();
+            }else if(choice == "huh??"){
+                console.log("wat")
+            };
+
+            //rewards
+            if(didEatApple()){
+                reward = 10;
+            }else if(!isAlive()){
+                reward = -10;
+                if(status == "true random"){
+                    reward = -10;
+                };
+                console.log(episode+": \n"+state+"\n"+status+"\n"+choicearr+"\n"+rewardarr+"\n"+choice+"\n score:"+score+"\n average of past 100 scores:"+movingAverage(score).toFixed(3));
+            }else{
+                reward = -0.1;
+            };
+            if(!state2){
+                state2 = {};
+            };
+
+            state2[choice] = reward;
+            table[state] = state2;
+            if(lastState && lastChoice) {
+                table[lastState][lastChoice] = ((table[lastState][lastChoice] || 0) + reward * 0.8);
+            };
+            lastState = state;
+            lastChoice = choice;
+}
+
+function getRandomInt(max){ return Math.floor(Math.random() * max); }
+
+/* =========================
+   RENDER
+========================= */
+const canvas = document.getElementById("game");
+const ctx = canvas.getContext("2d");
+const log = document.getElementById("log");
+
+function draw() {
+  ctx.clearRect(0,0,canvas.width,canvas.height);
+
+  ctx.fillStyle = "red";
+  ctx.fillRect(apple.x*TILE_SIZE, apple.y*TILE_SIZE, TILE_SIZE, TILE_SIZE);
+
+  ctx.fillStyle = "lime";
+  for(const s of snake){
+    ctx.fillRect(s.x*TILE_SIZE, s.y*TILE_SIZE, TILE_SIZE, TILE_SIZE);
+  }
+}
+
+/* =========================
+   GAME LOOP
+========================= */
+function tick(){
+  if(alive) snakeAI();
+  else if(pendingReset){
+    resetCountdown--;
+    if(resetCountdown <=0){
+      episode++;
+      resetGame();
+    }
+  }
+
+  draw();
+
+  log.textContent =
+    `Episode: ${episode}\n` +
+    `Alive: ${isAlive()}\n` +
+    `Score: ${score}\n` +
+    `High Score: ${highScore}\n` +
+    `Ate apple: ${didEatApple()}\n\n` +
+    getView(5);
+}
+
+setInterval(tick, TICK_MS);
+
+/* =========================
+   FIELD SIZE
+========================= */
+const fieldSizeSelect = document.getElementById("fieldSize");
+fieldSizeSelect.onchange = () => {
+    GRID_SIZE = Number(fieldSizeSelect.value);
+    canvas.width = GRID_SIZE*TILE_SIZE;
+    canvas.height = GRID_SIZE*TILE_SIZE;
+    episode = 0;
+    table = {};
+    resetGame();
+}
+
+/* =========================
+   Q-TABLE VISUALIZER
+========================= */
+const showBtn = document.getElementById("showTable");
+const overlay = document.getElementById("tableOverlay");
+const content = document.getElementById("tableContent");
+
+showBtn.onclick = () => {
+  content.innerHTML = "";
+
+  for(const state in table){
+    const actions = table[state];
+    let bestAction = null;
+    let bestReward = -Infinity;
+
+    for(const a in actions){
+      if(actions[a] > bestReward){
+        bestReward = actions[a];
+        bestAction = a;
+      }
+    }
+
+    const box = document.createElement("div");
+    box.className = "stateBox";
+    box.textContent = state.trim();
+
+    const info = document.createElement("div");
+    info.className = "action";
+    info.textContent = `best: ${bestAction} (${bestReward.toFixed(2)})`;
+
+    box.appendChild(info);
+    content.appendChild(box);
+  }
+
+  overlay.style.display = "block";
+};
+
+overlay.onclick = () => { overlay.style.display = "none"; };
+
+function createMovingAverage() {
+    // Array to store the last 100 numbers
+    const history = [];
+    // Maximum number of values to keep
+    const maxSize = 100;
+
+    return function(input) {
+        // Add the new input to the history
+        history.push(input);
+
+        // If we exceed the maximum size, remove the oldest element
+        if (history.length > maxSize) {
+            history.shift();
+        }
+
+        // Calculate the average
+        const sum = history.reduce((acc, val) => acc + val, 0);
+        return sum / history.length;
+    };
+}
+
+// Create the moving average function
+const movingAverage = createMovingAverage();
+canvas.width = GRID_SIZE*TILE_SIZE;
+canvas.height = GRID_SIZE*TILE_SIZE;
+</script>
+</body>
+</html>
